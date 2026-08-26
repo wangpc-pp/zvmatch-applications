@@ -24,11 +24,12 @@ if [[ ! -f ${QEMU_INSN_PLUGIN} ]]; then
   exit 1
 fi
 
-declare -a names=("scalar" "rvv" "zvmatch")
-declare -a executables=("run-scalar" "run-rvv" "run-zvmatch")
+declare -a names=("scalar" "rvv" "zvmatch" "zvmatch-vx")
+declare -a executables=("run-scalar" "run-rvv" "run-zvmatch" "run-zvmatch-vx")
 declare -a cpus=(
   "max,v=false,zvmatch=false"
   "max,v=true,vlen=${VLEN},zvmatch=false"
+  "max,v=true,vlen=${VLEN},zvmatch=true"
   "max,v=true,vlen=${VLEN},zvmatch=true"
 )
 

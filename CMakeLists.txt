@@ -39,13 +39,14 @@ endfunction()
 add_application_runner(run-scalar reference.c rv64gc)
 add_application_runner(run-rvv rvv_without_zvmatch.c rv64gcv)
 add_application_runner(run-zvmatch rvv_with_zvmatch.c rv64gcv_zvmatch0p1)
+add_application_runner(run-zvmatch-vx rvv_with_zvmatch_vx.c rv64gcv_zvmatch0p1)
 
 add_custom_target(
   run
   COMMAND
     "${CMAKE_CURRENT_SOURCE_DIR}/scripts/run-qemu.sh"
     "${CMAKE_CURRENT_BINARY_DIR}"
-  DEPENDS run-scalar run-rvv run-zvmatch
+  DEPENDS run-scalar run-rvv run-zvmatch run-zvmatch-vx
   USES_TERMINAL)
 
 add_custom_target(
@@ -53,5 +54,5 @@ add_custom_target(
   COMMAND
     "${CMAKE_CURRENT_SOURCE_DIR}/scripts/count-instructions.sh"
     "${CMAKE_CURRENT_BINARY_DIR}"
-  DEPENDS run-scalar run-rvv run-zvmatch
+  DEPENDS run-scalar run-rvv run-zvmatch run-zvmatch-vx
   USES_TERMINAL)
