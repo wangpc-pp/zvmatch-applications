@@ -1,12 +1,15 @@
 # Zvmatch Application Examples
 
 This project demonstrates set-membership workloads for the experimental
-RISC-V Zvmatch extension. Every workload has three interchangeable
+RISC-V Zvmatch extension. Every workload has four interchangeable
 implementations:
 
 - scalar C reference;
 - ordinary RVV using `vmseq.vx` and `vmor.mm`;
-- RVV with `vmmatch.vx` or `vmmatch.vv`.
+- RVV with Zvmatch, choosing `.vv` or `.vx` per workload (the recommended
+  form);
+- RVV with Zvmatch using only `.vx` for every workload (the alternative
+  form, labeled `.vx only`).
 
 The driver validates fixed real-world examples and deterministic randomized
 inputs. It deliberately uses 4099 elements so every vector implementation
@@ -66,21 +69,39 @@ Function entry, one-time key loading or packing, the final `ret`, test-driver
 code, and checksum code are excluded. Scalar C is omitted because its loop
 processes one element rather than one VLEN-dependent vector chunk.
 
-| Workload | Plain RVV | Zvmatch | Reduction |
-|---|---:|---:|---:|
-| Tokenizer ASCII boundaries | 198 | 10 | 94.9% |
-| Tokenizer Unicode whitespace | 134 | 11 | 91.8% |
-| CSV delimiter scan | 16 | 10 | 37.5% |
-| JSON classification | 34 | 16 | 52.9% |
-| HTTP delimiter scan | 24 | 10 | 58.3% |
-| Database `IN`-list | 69 | 11 | 84.1% |
-| Image palette membership | 88 | 10 | 88.6% |
-| Network port membership | 17 | 11 | 35.3% |
+The `Zvmatch (.vx only)` column implements every workload with packed scalar-key
+`.vx` operations, splitting keys larger than one register into multiple packs
+combined with `vmor.mm`. The recommended `Zvmatch` binary instead uses `.vv`
+for workloads where the key set fits in one key register group at VLEN=128,
+and `.vx` where a single packed register already covers the set.
 
-The largest reductions occur for `.vv` workloads because ordinary RVV performs
-one compare per key and combines the masks. The `.vx` workloads have smaller
-sets, so Zvmatch replaces fewer compares. JSON uses three independent key
-classes and therefore executes three `vmmatch.vx` instructions per iteration.
+| Workload | Plain RVV | Zvmatch | Zvmatch (.vx only) | Reduction (Zvmatch) | Reduction (.vx only) |
+|---|---:|---:|---:|---:|---:|
+| Tokenizer ASCII boundaries | 198 | 9 | 17 | 95.5% | 91.4% |
+| Tokenizer Unicode whitespace | 134 | 10 | 22 | 92.5% | 83.6% |
+| CSV delimiter scan | 16 | 9 | 9 | 43.8% | 43.8% |
+| JSON classification | 34 | 15 | 15 | 55.9% | 55.9% |
+| HTTP delimiter scan | 24 | 9 | 9 | 62.5% | 62.5% |
+| Database `IN`-list | 69 | 10 | 14 | 85.5% | 79.7% |
+| Image palette membership | 88 | 9 | 11 | 89.8% | 87.5% |
+| Network port membership | 17 | 10 | 10 | 41.2% | 41.2% |
+
+`.vv` dominates for large key sets because one instruction compares against
+the entire VLMAX key group; ordinary RVV needs one compare per key. `.vx`
+matches or beats `.vv` for sets that fit in one scalar register (CSV, HTTP,
+network ports) and for the multi-class JSON kernel, where three packed
+`.vx` operations avoid three separate key-vector loads and comparisons. For
+sets larger than one register (38-byte tokenizer class, 25-entry whitespace,
+12-value database list, 16-byte palette), splitting into multiple `.vx`
+packs adds `vmmatch.vx` + `vmor.mm` per extra pack and is slower than a
+single `.vv`.
+
+When a key set fits in one scalar register, both forms issue exactly one
+`vmmatch` per chunk, so `.vv` has no compare-count advantage. Its separate
+key-vector prologue and extra vector source operand also raise register
+pressure slightly, which leaves the steady-state loop one instruction longer
+than the `.vx` form in the compiled binaries. That is why the recommended
+binary uses `.vx` for those workloads rather than `.vv` everywhere.
 
 ## Project Layout
 
@@ -88,7 +109,8 @@ classes and therefore executes three `vmmatch.vx` instructions per iteration.
 - `keysets.c`: shared character/value sets;
 - `reference.c`: scalar reference implementation;
 - `rvv_without_zvmatch.c`: ordinary RVV comparison;
-- `rvv_with_zvmatch.c`: Zvmatch implementation;
+- `rvv_with_zvmatch.c`: Zvmatch implementation, choosing `.vv` or `.vx`;
+- `rvv_with_zvmatch_vx.c`: Zvmatch implementation using only `.vx`;
 - `run.c`: deterministic validation driver;
 - `cmake/riscv64-toolchain.cmake`: environment-driven cross-compilation;
 - `scripts/run-qemu.sh`: multi-VLEN execution and feature-gate test;
@@ -141,14 +163,14 @@ Static linking is enabled by default. It can be disabled with
 The QEMU script runs:
 
 - the scalar binary once;
-- plain RVV and Zvmatch at VLEN 128, 256, and 512;
-- a negative feature-gate test that requires the Zvmatch binary to fail when
-  `zvmatch=false`.
+- plain RVV, Zvmatch, and Zvmatch `.vx only` at VLEN 128, 256, and 512;
+- a negative feature-gate test that requires the Zvmatch binaries to fail
+  when `zvmatch=false`.
 
 ## Verified Results
 
 All eight workloads produce identical checksums for scalar C, ordinary RVV,
-and Zvmatch at every tested VLEN:
+Zvmatch, and Zvmatch `.vx only` at every tested VLEN:
 
 ```text
 Tokenizer ASCII boundaries      9d8a7e813dfc7d14
@@ -166,14 +188,18 @@ At VLEN=128, the Zvmatch binary dynamically executes both forms:
 
 ```text
 variant        total-insns   vmmatch.vv   vmmatch.vx
-scalar             5461692            0            0
-rvv                3129410            0            0
-zvmatch            3085630          388          454
+scalar             5462449            0            0
+rvv                3130068            0            0
+zvmatch            3086288          388          454
+zvmatch-vx         3088216            0         2199
 ```
 
 The Zvmatch counts match the loop structure exactly. The four `.vv` workloads
 execute 388 chunks in total; CSV, three JSON classes, HTTP, and network ports
-execute 454 `.vx` operations.
+execute 454 `.vx` operations. The `.vx`-only binary performs 2199
+`vmmatch.vx` operations: it splits the 38-byte tokenizer class into five
+packs, the 25-entry Unicode whitespace into seven packs, the 12-value database
+list into three packs, and the 16-byte palette into two packs.
 
 The instruction totals are functional profiling data under QEMU TCG, not a
 hardware performance claim. End-to-end speedups require measurements on real
