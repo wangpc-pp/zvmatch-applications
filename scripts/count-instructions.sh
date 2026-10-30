@@ -12,7 +12,7 @@ BUILD_DIR=${1:-${BUILD_DIR:-build}}
 : "${QEMU_INSN_PLUGIN:?Set QEMU_INSN_PLUGIN to the QEMU libinsn.so plugin}"
 
 VLEN=${VLEN:-128}
-DEFAULT_MATCHES="vmmatch.vv vmmatch.vx vmseq vmor.mm vmerge vle8.v vle16.v vse8.v vse16.v vsetvli"
+DEFAULT_MATCHES="vmmatch.vs vmmatch.vx vmseq vmor.mm vmerge vle8.v vle16.v vse8.v vse16.v vsetvli"
 MATCHES=${QEMU_INSN_MATCHES:-${DEFAULT_MATCHES}}
 
 if [[ ! -x ${QEMU_RISCV64} ]]; then
@@ -53,12 +53,17 @@ for index in "${!names[@]}"; do
     plugin_arguments+="${match_arguments}"
   fi
 
-  "${QEMU_RISCV64}" \
+  # Keep guest startup independent of the host environment.
+  if ! env -i "${QEMU_RISCV64}" \
     -cpu "${cpus[index]}" \
     -plugin "${QEMU_INSN_PLUGIN},${plugin_arguments}" \
     -d plugin \
     "${BUILD_DIR}/${executables[index]}" \
-    >/dev/null 2>"${log_file}"
+    >/dev/null 2>"${log_file}"; then
+    echo "error: QEMU instruction profiling failed for ${names[index]}" >&2
+    cat "${log_file}" >&2
+    exit 1
+  fi
 
   total=$(awk '/^total insns:/ {print $3}' "${log_file}")
   if [[ -z ${total} ]]; then

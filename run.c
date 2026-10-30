@@ -248,7 +248,92 @@ static int run_network_ports(void) {
   return verify_u16("Network port membership", network_port_keys, 4);
 }
 
-int main(void) {
+static const size_t short_counts[] = {
+    0,  1,  3,  7,   8,   9,   15,  16,  17,  31,  32,  33,
+    63, 64, 65, 127, 128, 129, 255, 256, 257, 511, 512, 513,
+};
+
+static int run_short_u8(const char *name,
+                        void (*classify)(const uint8_t *, uint8_t *, size_t),
+                        const uint8_t *keys, size_t key_count) {
+  for (size_t index = 0; index != TEST_COUNT; ++index)
+    byte_input[index] = index < 2 * key_count
+                            ? (index % 2 ? 0 : keys[key_count - 1 - index / 2])
+                            : (uint8_t)(index - 2 * key_count);
+  for (size_t test = 0; test != ARRAY_SIZE(short_counts); ++test) {
+    size_t count = short_counts[test];
+    memset(byte_output, 0xa5, sizeof(byte_output));
+    classify(byte_input, byte_output, count);
+    for (size_t index = 0; index != TEST_COUNT; ++index) {
+      uint8_t expected = index < count
+                             ? contains_u8(byte_input[index], keys, key_count)
+                             : UINT8_C(0xa5);
+      if (byte_output[index] != expected) {
+        fprintf(stderr,
+                "%s short-input mismatch: count=%zu index=%zu "
+                "actual=%u expected=%u\n",
+                name, count, index, byte_output[index], expected);
+        return 1;
+      }
+    }
+  }
+  printf("  %-31s PASS, %zu input lengths\n", name, ARRAY_SIZE(short_counts));
+  return 0;
+}
+
+static int run_short_u16(const char *name,
+                         void (*classify)(const uint16_t *, uint16_t *, size_t),
+                         const uint16_t *keys, size_t key_count) {
+  for (size_t index = 0; index != TEST_COUNT; ++index)
+    half_input[index] = index < 2 * key_count
+                            ? (index % 2 ? 0 : keys[key_count - 1 - index / 2])
+                            : (uint16_t)(index - 2 * key_count);
+  for (size_t test = 0; test != ARRAY_SIZE(short_counts); ++test) {
+    size_t count = short_counts[test];
+    memset(half_output, 0xa5, sizeof(half_output));
+    classify(half_input, half_output, count);
+    for (size_t index = 0; index != TEST_COUNT; ++index) {
+      uint16_t expected = index < count
+                              ? contains_u16(half_input[index], keys, key_count)
+                              : UINT16_C(0xa5a5);
+      if (half_output[index] != expected) {
+        fprintf(stderr,
+                "%s short-input mismatch: count=%zu index=%zu "
+                "actual=%u expected=%u\n",
+                name, count, index, half_output[index], expected);
+        return 1;
+      }
+    }
+  }
+  printf("  %-31s PASS, %zu input lengths\n", name, ARRAY_SIZE(short_counts));
+  return 0;
+}
+
+static int run_short_inputs(void) {
+  printf("Running %s short-input tests\n", implementation_name());
+  if (run_short_u8("Tokenizer ASCII boundaries",
+                   tokenizer_bert_ascii_boundaries, tokenizer_ascii_keys,
+                   tokenizer_ascii_key_count) ||
+      run_short_u16("Tokenizer Unicode whitespace",
+                    tokenizer_unicode_whitespace, tokenizer_whitespace_keys,
+                    tokenizer_whitespace_key_count) ||
+      run_short_u16("Database IN-list", database_u16_membership, database_keys,
+                    database_key_count) ||
+      run_short_u8("Image palette membership", image_palette_membership,
+                   palette_keys, palette_key_count))
+    return 1;
+  puts("All short-input tests passed");
+  return 0;
+}
+
+int main(int argc, char **argv) {
+  if (argc == 2 && strcmp(argv[1], "--short") == 0)
+    return run_short_inputs();
+  if (argc != 1) {
+    fprintf(stderr, "usage: %s [--short]\n", argv[0]);
+    return 2;
+  }
+
   printf("Running %s application tests with %u elements\n",
          implementation_name(), TEST_COUNT);
 
